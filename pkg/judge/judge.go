@@ -103,10 +103,11 @@ func (j *JudgeApi) searchDeny(filePath string, pid int, perm int) (bool, int, er
 	if err != nil {
 		return false, -1, util.ErrorWrapFunc(err)
 	}
-	if filePath == "/etc/passwd" {
+	if filePath == "/test/security/hello.sh" {
 		logrus.Debugf("exe: %v", exe)
 	}
 	if _, ok := j.deny[exe]; !ok {
+		logrus.Debug("non cell at first")
 		return false, -1, nil
 	}
 	cell := j.deny[exe]
@@ -126,7 +127,7 @@ func (j *JudgeApi) searchAllow(filePath string, pid int, perm int) (bool, int, e
 	if err != nil {
 		return true, -1, util.ErrorWrapFunc(err)
 	}
-	if filePath == "/etc/passwd" {
+	if filePath == "/test/security/hello.sh" {
 		logrus.Debugf("exe: %v", exe)
 	}
 	if _, ok := j.allow[exe]; !ok {
@@ -142,6 +143,7 @@ func (j *JudgeApi) searchAllow(filePath string, pid int, perm int) (bool, int, e
 }
 
 func (c *ruleCell) search(filePath string, pid int, perm int) (bool, int, error) {
+	logrus.Debug("in search")
 	var err error
 	npid := pid
 	resultDepth := -1
@@ -149,10 +151,11 @@ func (c *ruleCell) search(filePath string, pid int, perm int) (bool, int, error)
 	result := false
 	cell := c
 	for {
+		logrus.Debug("npid: ", npid)
 		if npid == 0 {
 			break
 		}
-		if filePath == "/etc/passwd" {
+		if filePath == "/test/security/hello.sh" {
 			logrus.Debugf("depth: %d", depth)
 		}
 		if len(cell.targetPath) != 0 {
@@ -176,7 +179,7 @@ func (c *ruleCell) search(filePath string, pid int, perm int) (bool, int, error)
 		if err != nil {
 			return result, resultDepth, util.ErrorWrapFunc(err)
 		}
-		if filePath == "/etc/passwd" {
+		if filePath == "/test/security/hello.sh" {
 			logrus.Debugf("exe: %v", exe)
 		}
 		if _, ok := cell.childrenExe[exe]; !ok {

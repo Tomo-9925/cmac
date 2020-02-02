@@ -58,11 +58,17 @@ func startMAC(h *hook.HookApi, j *judge.JudgeApi) {
 		}
 
 		if ev.Mask&fanotify.FAN_OPEN_PERM != 0 {
-			logrus.Infof("OPEN_PERM %v", fileName)
+			// logrus.Infof("OPEN_PERM %v", fileName)
 			if ok, err := j.Judge(fileName, int(ev.Pid), prof.OPEN); err != nil {
 				logrus.Error(err)
+				logrus.Infof("OPEN_ALLOW %v", fileName)
 				h.Nd.Response(ev, true)
 			} else {
+				if ok {
+					logrus.Infof("OPEN_ALLOW %v", fileName)
+				} else {
+					logrus.Infof("OPEN_DENY %v", fileName)
+				}
 				h.Nd.Response(ev, ok)
 			}
 			// /proc/[pid]/environがオープンできない問題を調査するためのdebugコード
@@ -83,13 +89,19 @@ func startMAC(h *hook.HookApi, j *judge.JudgeApi) {
 		}
 		if ev.Mask&fanotify.FAN_ACCESS_PERM != 0 {
 			// logrus.Infof("ACCESS_PERM %v", fileName)
-			// if ok, err := j.Judge(fileName, int(ev.Pid), prof.ACCESS); err != nil {
-			// 	logrus.Error(err)
-			// 	h.Nd.Response(ev, true)
-			// } else {
-			// 	h.Nd.Response(ev, ok)
-			// }
-			h.Nd.Response(ev, true)
+			if ok, err := j.Judge(fileName, int(ev.Pid), prof.ACCESS); err != nil {
+				logrus.Error(err)
+				logrus.Infof("ACCESS_ALLOW %v", fileName)
+				h.Nd.Response(ev, true)
+			} else {
+				if ok {
+					logrus.Infof("ACCESS_ALLOW %v", fileName)
+				} else {
+					logrus.Infof("ACCESS_DENY %v", fileName)
+				}
+				h.Nd.Response(ev, ok)
+			}
+			// h.Nd.Response(ev, true)
 		}
 
 		ev.File.Close()

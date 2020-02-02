@@ -20,6 +20,14 @@ const (
 	ALLOW = int(iota)
 )
 
+var (
+	permMap = map[int]string{
+		OPEN:   "o",
+		ACCESS: "a",
+		BOTH:   "ao",
+	}
+)
+
 // {exeString:{targetPath:perm}}
 type DenyProf map[string]map[string]int
 type AllowProf map[string]map[string]int
@@ -168,13 +176,19 @@ func parseList(line string) []string {
 
 func (p *ProfApi) checkProf() error {
 	ng := []string{}
-	for path := range p.Deny {
-		if _, ok := p.Allow[path]; ok {
-			ng = append(ng, path)
+	for path, dm := range p.Deny {
+		if am, ok := p.Allow[path]; ok {
+			for dpath, dperm := range dm {
+				for apath, aperm := range am {
+					if dpath == apath && dperm&aperm != 0 {
+						ng = append(ng, fmt.Sprintf("exe list : %s, target path: %s, perm: %s", path, dpath, permMap[dperm&aperm]))
+					}
+				}
+			}
 		}
 	}
 	if len(ng) != 0 {
-		return fmt.Errorf("same path defined at deny rule and allow rule:\n\t%v", strings.Join(ng, "\n\t"))
+		return fmt.Errorf("same target defined at deny rule and allow rule:\n\t- %v", strings.Join(ng, "\n\t-"))
 	}
 	return nil
 }
