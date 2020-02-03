@@ -115,6 +115,12 @@ func (j *JudgeApi) searchDeny(filePath string, pid int, perm int) (bool, int, er
 	if err != nil {
 		return false, -1, util.ErrorWrapFunc(err)
 	}
+	if cperm, ok := j.deny["*"].targetPath[filePath]; ok && (cperm&perm != 0) {
+		if !found {
+			found = true
+			depth = 0
+		}
+	}
 	return found, depth, nil
 }
 
@@ -137,6 +143,12 @@ func (j *JudgeApi) searchAllow(filePath string, pid int, perm int) (bool, int, e
 	found, depth, err := cell.search(filePath, pid, perm)
 	if err != nil {
 		return true, -1, util.ErrorWrapFunc(err)
+	}
+	if cperm, ok := j.allow["*"].targetPath[filePath]; ok && (cperm&perm != 0) {
+		if !found {
+			found = true
+			depth = 0
+		}
 	}
 	return found, depth, nil
 
@@ -233,6 +245,12 @@ func (c *ruleCell) search(filePath string, pid int, perm int) (bool, int, error)
 
 func (j *JudgeApi) compileRules() {
 	for exe, m := range j.p.Deny {
+		if exe == "*" {
+			for target, perm := range m {
+				j.deny["*"].targetPath[target] = perm
+			}
+
+		}
 		for target, perm := range m {
 			exeParts := strings.Split(exe, ",")
 			lix := len(exeParts) - 1
@@ -253,6 +271,11 @@ func (j *JudgeApi) compileRules() {
 	}
 
 	for exe, m := range j.p.Allow {
+		if exe == "*" {
+			for target, perm := range m {
+				j.allow["*"].targetPath[target] = perm
+			}
+		}
 		for target, perm := range m {
 			exeParts := strings.Split(exe, ",")
 			lix := len(exeParts) - 1
