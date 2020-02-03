@@ -20,16 +20,16 @@ type JudgeApi struct {
 type ruleCell struct {
 	targetPath  map[string]int
 	childrenExe map[string]*ruleCell
-	execPath    string
+	// execPath    string
 }
 
-func newRuleCell(execPath string) *ruleCell {
+func newRuleCell() *ruleCell {
 	t := make(map[string]int)
 	c := make(map[string]*ruleCell)
 	return &ruleCell{
 		targetPath:  t,
 		childrenExe: c,
-		execPath:    execPath,
+		// execPath:    execPath,
 	}
 }
 
@@ -147,7 +147,7 @@ func (c *ruleCell) search(filePath string, pid int, perm int) (bool, int, error)
 	var err error
 	npid := pid
 	resultDepth := -1
-	depth := 0
+	depth := 1
 	result := false
 	cell := c
 	for {
@@ -238,13 +238,13 @@ func (j *JudgeApi) compileRules() {
 			lix := len(exeParts) - 1
 			lstexe := exeParts[lix]
 			if _, ok := j.deny[lstexe]; !ok {
-				j.deny[lstexe] = newRuleCell(lstexe)
+				j.deny[lstexe] = newRuleCell()
 			}
 			cell := j.deny[lstexe]
 			for i := lix; i > 0; i-- {
 				nexe := exeParts[i-1]
 				if _, ok := cell.childrenExe[nexe]; !ok {
-					cell.childrenExe[nexe] = newRuleCell(nexe)
+					cell.childrenExe[nexe] = newRuleCell()
 				}
 				cell = cell.childrenExe[nexe]
 			}
@@ -258,13 +258,13 @@ func (j *JudgeApi) compileRules() {
 			lix := len(exeParts) - 1
 			lstexe := exeParts[lix]
 			if _, ok := j.allow[lstexe]; !ok {
-				j.allow[lstexe] = newRuleCell(lstexe)
+				j.allow[lstexe] = newRuleCell()
 			}
 			cell := j.allow[lstexe]
 			for i := lix; i > 0; i-- {
 				nexe := exeParts[i-1]
 				if _, ok := cell.childrenExe[nexe]; !ok {
-					cell.childrenExe[nexe] = newRuleCell(nexe)
+					cell.childrenExe[nexe] = newRuleCell()
 				}
 				cell = cell.childrenExe[nexe]
 			}
