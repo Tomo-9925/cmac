@@ -1,43 +1,43 @@
 package judge
 
 import (
-	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 	"github.com/xapima/cmac/pkg/prof"
+	"github.com/xapima/cmac/pkg/psutil"
 	"github.com/xapima/conps/pkg/ps"
 	"github.com/xapima/conps/pkg/util"
 )
 
 type JudgeApi struct {
 	p     *prof.ProfApi
-	allow map[string]*ruleCell
-	deny  map[string]*ruleCell
+	allow *ruleCell
+	deny  *ruleCell
 }
 
 type ruleCell struct {
-	targetPath  map[string]int
+	targetPath  map[string]uint
 	childrenExe map[string]*ruleCell
+	asterExe    map[string]*ruleCell
 	// execPath    string
 }
 
 func newRuleCell() *ruleCell {
-	t := make(map[string]int)
+	t := make(map[string]uint)
 	c := make(map[string]*ruleCell)
+	a := make(map[string]*ruleCell)
 	return &ruleCell{
 		targetPath:  t,
 		childrenExe: c,
+		asterExe:    a,
 		// execPath:    execPath,
 	}
 }
 
 func NewJudgeApi(p *prof.ProfApi) *JudgeApi {
-
-	a := make(map[string]*ruleCell)
-	d := make(map[string]*ruleCell)
-
+	a := newRuleCell()
+	d := newRuleCell()
 	j := &JudgeApi{
 		p:     p,
 		allow: a,
@@ -48,7 +48,7 @@ func NewJudgeApi(p *prof.ProfApi) *JudgeApi {
 
 }
 
-func (j *JudgeApi) Judge(filePath string, pid int, perm int) (bool, error) {
+func (j *JudgeApi) Judge(filePath string, pid int, perm uint) (bool, error) {
 	// ファイルアクセスを許可しない場合はfalseを返す
 	// denyルールに抵触するパターン
 	// allowルールにexeStringは含まれており、そのcellのlen(targetPath)!=0 なのに、パスが含まれていない場合
@@ -81,11 +81,6 @@ func (j *JudgeApi) Judge(filePath string, pid int, perm int) (bool, error) {
 		return true, nil
 	}
 
-	// ok, err := j.searchAllowNonSetting(filePath, pid, perm)
-	// if err != nil {
-	// 	return true, util.ErrorWrapFunc(err)
-	// }
-	// return ok, nil
 	return true, nil
 }
 
@@ -94,204 +89,176 @@ func (j *JudgeApi) Judge(filePath string, pid int, perm int) (bool, error) {
 // という条件の場合、ルールのロンゲストマッチを行う必要がある
 // このためには、Pid 0 までルールを探索し、マッチしたルールを列挙する必要がある
 
-func (j *JudgeApi) searchDeny(filePath string, pid int, perm int) (bool, int, error) {
+func (j *JudgeApi) searchDeny(filePath string, pid int, perm uint) (bool, int, error) {
 	// denyルールに抵触するとfalseを返す
 	// 発見した深さも返す
 
-	// exe, err := psutil.ExePath(pid)
-	exe, err := ps.Exe(filepath.Join(proc, strconv.Itoa(pid)))
+	exeList, err := getAllExe(pid)
+	if err != nil {
+		return false, 0, util.ErrorWrapFunc(err)
+	}
+	cell := j.deny
+	found, depth, err := cell.search(filePath, exeList, perm, -1)
 	if err != nil {
 		return false, -1, util.ErrorWrapFunc(err)
 	}
-	if filePath == "/test/security/hello.sh" {
-		logrus.Debugf("exe: %v", exe)
-	}
-	if _, ok := j.deny[exe]; !ok {
-		logrus.Debug("non cell at first")
-		return false, -1, nil
-	}
-	cell := j.deny[exe]
-	found, depth, err := cell.search(filePath, pid, perm)
-	if err != nil {
-		return false, -1, util.ErrorWrapFunc(err)
-	}
-	if cperm, ok := j.deny["*"].targetPath[filePath]; ok && (cperm&perm != 0) {
-		if !found {
-			found = true
-			depth = 0
-		}
-	}
+	logrus.Debugf("DENY: found %v, depth %d", found, depth)
+
 	return found, depth, nil
 }
 
-func (j *JudgeApi) searchAllow(filePath string, pid int, perm int) (bool, int, error) {
+func (j *JudgeApi) searchAllow(filePath string, pid int, perm uint) (bool, int, error) {
 	// allowルールに抵触するとtrueを返す
 	// 発見した深さも返す
 
-	// exe, err := psutil.ExePath(pid)
-	exe, err := ps.Exe(filepath.Join(proc, strconv.Itoa(pid)))
+	exeList, err := getAllExe(pid)
 	if err != nil {
-		return true, -1, util.ErrorWrapFunc(err)
+		return false, 0, util.ErrorWrapFunc(err)
 	}
-	if filePath == "/test/security/hello.sh" {
-		logrus.Debugf("exe: %v", exe)
-	}
-	if _, ok := j.allow[exe]; !ok {
-		return true, -1, nil
-	}
-	cell := j.allow[exe]
-	found, depth, err := cell.search(filePath, pid, perm)
-	if err != nil {
-		return true, -1, util.ErrorWrapFunc(err)
-	}
-	if cperm, ok := j.allow["*"].targetPath[filePath]; ok && (cperm&perm != 0) {
-		if !found {
-			found = true
-			depth = 0
-		}
-	}
-	return found, depth, nil
 
+	cell := j.allow
+	found, depth, err := cell.search(filePath, exeList, perm, -1)
+	if err != nil {
+		return true, -1, util.ErrorWrapFunc(err)
+	}
+
+	return found, depth, nil
 }
 
-func (c *ruleCell) search(filePath string, pid int, perm int) (bool, int, error) {
-	logrus.Debug("in search")
-	var err error
-	npid := pid
-	resultDepth := -1
-	depth := 1
+func (c *ruleCell) search(filePath string, exeList []string, perm uint, depth int) (bool, int, error) {
+	logrus.Debugf("SERCH: exeList %v, depth %d, targetList %v", exeList, depth, c.targetPath)
+
 	result := false
 	cell := c
-	for {
-		logrus.Debug("npid: ", npid)
-		if npid == 0 {
-			break
+	resultDepth := -1
+
+	if len(cell.targetPath) != 0 {
+		if cperm, ok := cell.targetPath[filePath]; ok {
+			if cperm&perm != 0 {
+				logrus.Debug("deny found, depth:", depth)
+				resultDepth = depth
+				result = true
+			}
 		}
-		if filePath == "/test/security/hello.sh" {
-			logrus.Debugf("depth: %d", depth)
-		}
-		if len(cell.targetPath) != 0 {
-			if cperm, ok := cell.targetPath[filePath]; ok {
-				if cperm&perm != 0 {
-					logrus.Debug("deny found, depth:", depth)
-					resultDepth = depth
+	}
+	if len(exeList) != 0 {
+		logrus.Debugf("len(exeList): %d", len(exeList))
+		exe := exeList[0]
+		if ncell, ok := cell.childrenExe[exe]; ok {
+			logrus.Debug("search in childrenExe")
+			ok, rDepth, err := ncell.search(filePath, exeList[1:], perm, depth+1)
+			if err != nil {
+				return false, -1, util.ErrorWrapFunc(err)
+			}
+			if ok {
+				if resultDepth < rDepth {
+					resultDepth = rDepth
 					result = true
 				}
 			}
 		}
-		npid, err = ps.PPid(npid)
-		if err != nil {
-			return result, resultDepth, util.ErrorWrapFunc(err)
+
+		logrus.Debugf("asterExe: %v", cell.asterExe)
+		for asterPath, asterCell := range cell.asterExe {
+			logrus.Debugf("astarPath: %s", asterPath)
+			for index, exePath := range exeList {
+				logrus.Debugf("in aster: aster %s, exe %s", asterPath, exePath)
+				if exePath == asterPath {
+					ncell := asterCell
+					ok, rDepth, err := ncell.search(filePath, exeList[1+index:], perm, depth+1)
+					if err != nil {
+						return false, -1, util.ErrorWrapFunc(err)
+					}
+					if ok {
+						if resultDepth < rDepth {
+							resultDepth = rDepth
+							result = true
+						}
+					}
+					// break
+				}
+			}
 		}
-		if npid == 0 {
-			break
-		}
-		// exe, err := psutil.ExePath(npid)
-		exe, err := ps.Exe(filepath.Join(proc, strconv.Itoa(npid)))
-		if err != nil {
-			return result, resultDepth, util.ErrorWrapFunc(err)
-		}
-		if filePath == "/test/security/hello.sh" {
-			logrus.Debugf("exe: %v", exe)
-		}
-		if _, ok := cell.childrenExe[exe]; !ok {
-			logrus.Debug("cell not found")
-			break
-		}
-		cell = cell.childrenExe[exe]
-		depth++
 	}
 	return result, resultDepth, nil
 }
 
-// func (j *JudgeApi) searchAllowNonSetting(filePath string, pid int, perm int) (bool, error) {
-// 	// allowルールにexeStringは含まれており、そのcellのlen(targetPath)!=0 なのにパスが含まれていない場合falseを返す
-// 	npid := pid
-// 	// exe, err := psutil.ExePath(npid)
-// 	exe, err := ps.Exe(filepath.Join(proc, strconv.Itoa(npid)))
-// 	if err != nil {
-// 		return true, util.ErrorWrapFunc(err)
-// 	}
-// 	cell := j.deny[exe]
-// 	result := true
-// 	for {
-// 		if npid == 0 {
-// 			break
-// 		}
-// 		if len(cell.targetPath) != 0 {
-// 			if cperm, ok := cell.targetPath[filePath]; !ok || (ok && cperm&perm == 0) {
-// 				result = false
-// 			}
-// 		}
-// 		npid, err = ps.PPid(pid)
-// 		if err != nil {
-// 			return result, util.ErrorWrapFunc(err)
-// 		}
-// 		if npid == 0 {
-// 			break
-// 		}
-// 		// exe, err := psutil.ExePath(npid)
-// 		exe, err := ps.Exe(filepath.Join(proc, strconv.Itoa(npid)))
-// 		if err != nil {
-// 			return result, util.ErrorWrapFunc(err)
-// 		}
-// 		if _, ok := cell.childrenExe[exe]; !ok {
-// 			break
-// 		}
-// 		cell = cell.childrenExe[exe]
-// 	}
-// 	return result, nil
-// }
-
 func (j *JudgeApi) compileRules() {
 	for exe, m := range j.p.Deny {
-		if exe == "*" {
-			for target, perm := range m {
-				j.deny["*"].targetPath[target] = perm
-			}
-
-		}
+		logrus.Debug("NEW_RULE")
 		for target, perm := range m {
 			exeParts := strings.Split(exe, ",")
-			lix := len(exeParts) - 1
-			lstexe := exeParts[lix]
-			if _, ok := j.deny[lstexe]; !ok {
-				j.deny[lstexe] = newRuleCell()
-			}
-			cell := j.deny[lstexe]
-			for i := lix; i > 0; i-- {
-				nexe := exeParts[i-1]
-				if _, ok := cell.childrenExe[nexe]; !ok {
-					cell.childrenExe[nexe] = newRuleCell()
+			cell := j.deny
+			for i := len(exeParts) - 1; i >= 0; i-- {
+				switch exeParts[i] {
+				case "*":
+					if i == 0 {
+						break
+					}
+					i--
+					if _, ok := cell.asterExe[exeParts[i]]; !ok {
+						cell.asterExe[exeParts[i]] = newRuleCell()
+					}
+					logrus.Debugf("CELL nextExe %s: %v", exeParts[i], cell)
+					cell = cell.asterExe[exeParts[i]]
+				default:
+					if _, ok := cell.childrenExe[exeParts[i]]; !ok {
+						cell.childrenExe[exeParts[i]] = newRuleCell()
+					}
+					logrus.Debugf("CELL nextExe %s: %v", exeParts[i], cell)
+					cell = cell.childrenExe[exeParts[i]]
 				}
-				cell = cell.childrenExe[nexe]
 			}
-			cell.targetPath[target] = perm
+			cell.targetPath[target] |= perm
+			logrus.Debugf("CELL END exe %s, target %s : %v", exeParts[0], target, cell)
 		}
+
 	}
 
 	for exe, m := range j.p.Allow {
-		if exe == "*" {
-			for target, perm := range m {
-				j.allow["*"].targetPath[target] = perm
-			}
-		}
 		for target, perm := range m {
 			exeParts := strings.Split(exe, ",")
-			lix := len(exeParts) - 1
-			lstexe := exeParts[lix]
-			if _, ok := j.allow[lstexe]; !ok {
-				j.allow[lstexe] = newRuleCell()
-			}
-			cell := j.allow[lstexe]
-			for i := lix; i > 0; i-- {
-				nexe := exeParts[i-1]
-				if _, ok := cell.childrenExe[nexe]; !ok {
-					cell.childrenExe[nexe] = newRuleCell()
+			cell := j.allow
+			for i := len(exeParts) - 1; i >= 0; i-- {
+				switch exeParts[i] {
+				case "*":
+					if i == 0 {
+						break
+					}
+					i--
+					if _, ok := cell.asterExe[exeParts[i]]; !ok {
+						cell.asterExe[exeParts[i]] = newRuleCell()
+					}
+					cell = cell.asterExe[exeParts[i]]
+				default:
+					if _, ok := cell.childrenExe[exeParts[i]]; !ok {
+						cell.childrenExe[exeParts[i]] = newRuleCell()
+					}
+					cell = cell.childrenExe[exeParts[i]]
 				}
-				cell = cell.childrenExe[nexe]
+				cell.targetPath[target] |= perm
 			}
-			cell.targetPath[target] = perm
 		}
 	}
+}
+
+func getAllExe(pid int) ([]string, error) {
+	out := make([]string, 0, 3)
+	npid := pid
+	for {
+		if npid == 0 {
+			break
+		}
+		exe, err := psutil.GetExePath(npid)
+		if err != nil {
+			return nil, util.ErrorWrapFunc(err)
+		}
+		out = append(out, exe)
+		npid, err = ps.PPid(npid)
+		logrus.Debugf("getAllExe npid: %d", npid)
+		if err != nil {
+			return nil, util.ErrorWrapFunc(err)
+		}
+	}
+	return out, nil
 }

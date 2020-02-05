@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	OPEN   = 1
-	ACCESS = 1 << iota
+	OPEN   = uint(1)
+	ACCESS = uint(1 << iota)
 	BOTH   = OPEN | ACCESS
 
 	DENY  = int(iota)
@@ -21,7 +21,7 @@ const (
 )
 
 var (
-	permMap = map[int]string{
+	permMap = map[uint]string{
 		OPEN:   "o",
 		ACCESS: "a",
 		BOTH:   "ao",
@@ -29,8 +29,8 @@ var (
 )
 
 // {exeString:{targetPath:perm}}
-type DenyProf map[string]map[string]int
-type AllowProf map[string]map[string]int
+type DenyProf map[string]map[string]uint
+type AllowProf map[string]map[string]uint
 
 type ProfApi struct {
 	readFlag     int
@@ -81,8 +81,9 @@ func (p *ProfApi) readProf(profPath string) error {
 func (p *ProfApi) parseProfLine(line string) error {
 	logrus.Debugf("line: %v", line)
 	switch {
+	case strings.HasPrefix(strings.TrimSpace(line), "#"):
+		break
 	case strings.HasPrefix(line, "deny"):
-		logrus.Debug("in deny")
 		rawExeList := strings.TrimSpace((strings.TrimPrefix(line, "deny")))
 		exeList := parseList(rawExeList)
 		exeListString := strings.Join(exeList, ",")
@@ -90,7 +91,6 @@ func (p *ProfApi) parseProfLine(line string) error {
 		p.readFlag = DENY
 		logrus.Debugf("exeListString: %v", exeListString)
 	case strings.HasPrefix(line, "allow"):
-		logrus.Debug("in allow")
 		rawExeList := strings.TrimSpace((strings.TrimPrefix(line, "allow")))
 		exeList := parseList(rawExeList)
 		exeListString := strings.Join(exeList, ",")
@@ -115,18 +115,18 @@ func (p *ProfApi) parseProfLine(line string) error {
 			switch strings.TrimSpace(parts[1]) {
 			case "o":
 				if _, ok := p.Deny[p.nowExeString]; !ok {
-					p.Deny[p.nowExeString] = make(map[string]int)
+					p.Deny[p.nowExeString] = make(map[string]uint)
 				}
 				p.Deny[p.nowExeString][path] = OPEN
 			case "a":
 				if _, ok := p.Deny[p.nowExeString]; !ok {
-					p.Deny[p.nowExeString] = make(map[string]int)
+					p.Deny[p.nowExeString] = make(map[string]uint)
 				}
 				p.Deny[p.nowExeString][path] = ACCESS
 			case "oa", "ao":
 
 				if _, ok := p.Deny[p.nowExeString]; !ok {
-					p.Deny[p.nowExeString] = make(map[string]int)
+					p.Deny[p.nowExeString] = make(map[string]uint)
 				}
 				p.Deny[p.nowExeString][path] = BOTH
 			default:
@@ -137,18 +137,18 @@ func (p *ProfApi) parseProfLine(line string) error {
 			switch strings.TrimSpace(parts[1]) {
 			case "o":
 				if _, ok := p.Allow[p.nowExeString]; !ok {
-					p.Allow[p.nowExeString] = make(map[string]int)
+					p.Allow[p.nowExeString] = make(map[string]uint)
 				}
 				p.Allow[p.nowExeString][path] = OPEN
 			case "a":
 				if _, ok := p.Allow[p.nowExeString]; !ok {
-					p.Allow[p.nowExeString] = make(map[string]int)
+					p.Allow[p.nowExeString] = make(map[string]uint)
 				}
 				p.Allow[p.nowExeString][path] = ACCESS
 			case "oa", "ao":
 
 				if _, ok := p.Allow[p.nowExeString]; !ok {
-					p.Allow[p.nowExeString] = make(map[string]int)
+					p.Allow[p.nowExeString] = make(map[string]uint)
 				}
 				p.Allow[p.nowExeString][path] = BOTH
 			default:
